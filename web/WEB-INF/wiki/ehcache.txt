@@ -1,0 +1,125 @@
+缓存配置
+Ehcache支持通过xml文件和API两种方式进行配置。
+
+xml方式
+Ehcache的CacheManager构造函数或工厂方法被调用时，会默认加载classpath下名为ehcache.xml的配置文件。如果加载失败，会加载Ehcache jar包中的ehcache-failsafe.xml文件，这个文件中含有简单的默认配置。
+ehcache.xml配置参数说明：
+
+name：缓存名称。
+maxElementsInMemory：缓存最大个数。
+eternal：缓存中对象是否为永久的，如果是，超时设置将被忽略，对象从不过期。
+timeToIdleSeconds：置对象在失效前的允许闲置时间（单位：秒）。仅当eternal=false对象不是永久有效时使用，可选属性，默认值是0，也就是可闲置时间无穷大。
+timeToLiveSeconds：缓存数据的生存时间（TTL），也就是一个元素从构建到消亡的最大时间间隔值，这只能在元素不是永久驻留时有效，如果该值是0就意味着元素可以停顿无穷长的时间。
+maxEntriesLocalDisk：当内存中对象数量达到maxElementsInMemory时，Ehcache将会对象写到磁盘中。
+overflowToDisk：内存不足时，是否启用磁盘缓存。
+diskSpoolBufferSizeMB：这个参数设置DiskStore（磁盘缓存）的缓存区大小。默认是30MB。每个Cache都应该有自己的一个缓冲区。
+maxElementsOnDisk：硬盘最大缓存个数。
+diskPersistent：是否在VM重启时存储硬盘的缓存数据。默认值是false。
+diskExpiryThreadIntervalSeconds：磁盘失效线程运行时间间隔，默认是120秒。
+memoryStoreEvictionPolicy：当达到maxElementsInMemory限制时，Ehcache将会根据指定的策略去清理内存。默认策略是LRU（最近最少使用）。你可以设置为FIFO（先进先出）或是LFU（较少使用）。
+clearOnFlush：内存数量最大时是否清除。
+ehcache.xml的一个范例
+
+<?xml version="1.0" encoding="UTF-8"?>
+<ehcache xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="http://ehcache.org/ehcache.xsd">
+
+  <!-- 磁盘缓存位置 -->
+  <diskStore path="java.io.tmpdir/ehcache"/>
+
+  <!-- 默认缓存 -->
+  <defaultCache
+          maxEntriesLocalHeap="10000"
+          eternal="false"
+          timeToIdleSeconds="120"
+          timeToLiveSeconds="120"
+          maxEntriesLocalDisk="10000000"
+          diskExpiryThreadIntervalSeconds="120"
+          memoryStoreEvictionPolicy="LRU">
+    <persistence strategy="localTempSwap"/>
+  </defaultCache>
+
+  <cache name="userCache"
+         maxElementsInMemory="1000"
+         eternal="false"
+         timeToIdleSeconds="3"
+         timeToLiveSeconds="3"
+         maxEntriesLocalDisk="10000000"
+         overflowToDisk="false"
+         memoryStoreEvictionPolicy="LRU"/>
+</ehcache>
+API方式
+xml配置的参数也可以直接通过编程方式来动态的进行配置（dynamicConfig没有设为false）。
+
+Cache cache = manager.getCache("sampleCache"); 
+CacheConfiguration config = cache.getCacheConfiguration(); 
+config.setTimeToIdleSeconds(60); 
+config.setTimeToLiveSeconds(120); 
+config.setmaxEntriesLocalHeap(10000); 
+config.setmaxEntriesLocalDisk(1000000);
+也可以通过disableDynamicFeatures()方式关闭动态配置开关。配置以后你将无法再以编程方式配置参数。
+
+Cache cache = manager.getCache("sampleCache"); 
+cache.disableDynamicFeatures();
+
+
+注解基本使用方法
+Spring对缓存的支持类似于对事务的支持。
+首先使用注解标记方法，相当于定义了切点，然后使用Aop技术在这个方法的调用前、调用后获取方法的入参和返回值，进而实现了缓存的逻辑。
+下面三个注解都是方法级别：
+
+@Cacheable
+表明所修饰的方法是可以缓存的：当第一次调用这个方法时，它的结果会被缓存下来，在缓存的有效时间内，以后访问这个方法都直接返回缓存结果，不再执行方法中的代码段。
+这个注解可以用condition属性来设置条件，如果不满足条件，就不使用缓存能力，直接执行方法。
+可以使用key属性来指定key的生成规则。
+
+@CachePut
+与@Cacheable不同，@CachePut不仅会缓存方法的结果，还会执行方法的代码段。
+它支持的属性和用法都与@Cacheable一致。
+
+@CacheEvict
+与@Cacheable功能相反，@CacheEvict表明所修饰的方法是用来删除失效或无用的缓存数据。
+下面是@Cacheable、@CacheEvict和@CachePut基本使用方法的一个集中展示：
+
+@Service
+public class UserService {
+    // @Cacheable可以设置多个缓存，形式如：@Cacheable({"books", "isbns"})
+    @Cacheable({"users"})
+    public User findUser(User user) {
+        return findUserInDB(user.getId());
+    }
+
+    @Cacheable(value = "users", condition = "#user.getId() <= 2")
+    public User findUserInLimit(User user) {
+        return findUserInDB(user.getId());
+    }
+
+    @CachePut(value = "users", key = "#user.getId()")
+    public void updateUser(User user) {
+        updateUserInDB(user);
+    }
+
+    @CacheEvict(value = "users")
+    public void removeUser(User user) {
+        removeUserInDB(user.getId());
+    }
+
+    @CacheEvict(value = "users", allEntries = true)
+    public void clear() {
+        removeAllInDB();
+    }
+}
+@Caching
+如果需要使用同一个缓存注解（@Cacheable、@CacheEvict或@CachePut）多次修饰一个方法，就需要用到@Caching。
+
+@Caching(evict = { @CacheEvict("primary"), @CacheEvict(cacheNames="secondary", key="#p0") })
+public Book importBooks(String deposit, Date date)
+@CacheConfig
+与前面的缓存注解不同，这是一个类级别的注解。
+如果类的所有操作都是缓存操作，你可以使用@CacheConfig来指定类，省去一些配置。
+
+@CacheConfig("books")
+public class BookRepositoryImpl implements BookRepository {
+    @Cacheable
+    public Book findBook(ISBN isbn) {...}
+}
